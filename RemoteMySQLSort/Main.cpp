@@ -8,95 +8,21 @@
 #include "mysql/mysql.h"
 
 //-----------------------------------------------------------------------------
-class DBQuery {
-private:
-	MYSQL*       m_pDBCon;
-	MYSQL_RES*   m_pResult;
-	char*        m_strQuery;
-	unsigned int m_uiNumFields;
-	MYSQL_FIELD* m_pFields;
+#define H(key) hash_table[hash_multiplicative(key)]
 
-protected:
-	void _reset(void);
+#define HASH_SIZE 1000
 
-public:
-	bool Execute(const char* strQuery);
-	const char* GetQuery(void) { return m_strQuery; }
+int hash_table[HASH_SIZE];
 
-public:
-	DBQuery(MYSQL* pDBCon);
-	~DBQuery(void);
-};
+unsigned int hash_multiplicative(const char* key) {
+	unsigned int hash = 0;
 
-//-----------------------------------------------------------------------------
-DBQuery::DBQuery(MYSQL* pDBCon) {
-	m_pDBCon      = pDBCon;
-	m_pResult     = NULL;
-	m_strQuery    = NULL;
-	m_uiNumFields = 0;
-	m_pFields     = NULL;
-}
-
-//-----------------------------------------------------------------------------
-DBQuery::~DBQuery(void) {
-	_reset();
-}
-
-//-----------------------------------------------------------------------------
-void DBQuery::_reset(void) {
-	if(m_strQuery) free(m_strQuery);
-	if(m_pResult) mysql_free_result(m_pResult);
-	if(m_pFields) free(m_pFields);
-}
-
-//-----------------------------------------------------------------------------
-bool DBQuery::Execute(const char* strQuery) {
-	if(strQuery == NULL) return false;
-
-	_reset();
-
-	int iStrLen = strlen(strQuery);
-	m_strQuery = (char*)calloc((iStrLen+1), sizeof(char));
-	memcpy(m_strQuery, strQuery, iStrLen);
-
-	if(mysql_query(m_pDBCon, m_strQuery)) {
-		fprintf(stderr, "ERROR: \"%s\"\n", mysql_error(m_pDBCon));
-		return false;
+	int len = strlen(key);
+	for(int i=0; i<len; ++i) {
+		hash = 31*hash + key[i];
 	}
 
-	m_pResult = mysql_store_result(m_pDBCon);
-
-	if(m_pResult == NULL) {
-		fprintf(stderr, "ERROR: \"%s\"\n", mysql_error(m_pDBCon));
-		return false;
-	}
-
-	m_uiNumFields = mysql_num_fields(m_pResult);
-	m_pFields = (MYSQL_FIELD*)malloc(m_uiNumFields*sizeof(MYSQL_FIELD));
-
-	MYSQL_FIELD* field;
-	for(int i=0; (field=mysql_fetch_field(m_pResult)); ++i) {
-		m_pFields[i] = *field;
-	}
-
-	MYSQL_ROW row;
-	for(int i=0; (row = mysql_fetch_row(m_pResult)); ++i) {
-		unsigned long* lengths = mysql_fetch_lengths(m_pResult);
-
-		unsigned int j;
-		for(j=0; j<m_uiNumFields; ++j) {
-
-			char first_name[15] = "";
-
-			if(!strcmp(m_pFields[j].name, "first_name")) {
-				if(m_pFields[j].type & MYSQL_TYPE_STRING) {
-					memcpy(first_name, row[j], lengths[j]);
-					printf("first_name: %s\n", first_name);
-				}
-			}
-
-		}
-	}
+	return hash % HASH_SIZE;
 }
 
 //-----------------------------------------------------------------------------
@@ -116,54 +42,56 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
-	DBQuery query(&db_con);
-	query.Execute("SELECT * FROM employees LIMIT 10;");
-
-	/*
-	if(mysql_query(&m_dbCon, "SELECT * FROM employees LIMIT 10;")) {
-		fprintf(stderr, "ERROR: \"%s\"\n", mysql_error(&m_dbCon));
+	if(mysql_query(&db_con, "SELECT * FROM employees LIMIT 10;")) {
+		fprintf(stderr, "ERROR: \"%s\"\n", mysql_error(&db_con));
 		system("pause");
 		return -1;
 	}
 
-	MYSQL_RES* result = mysql_store_result(&m_dbCon);
+	MYSQL_RES* result = mysql_store_result(&db_con);
 	if(result == NULL) {
-		fprintf(stderr, "ERROR: \"%s\"\n", mysql_error(&m_dbCon));
+		fprintf(stderr, "ERROR: \"%s\"\n", mysql_error(&db_con));
 		system("pause");
 		return -1;
 	}
 
-	unsigned int nFields = mysql_num_fields(result);
-	MYSQL_FIELD** ppFields = (MYSQL_FIELD**)malloc(nFields*sizeof(MYSQL_FIELD*));
+	unsigned int num_fields = mysql_num_fields(result);
+	MYSQL_FIELD** fields = (MYSQL_FIELD**)malloc(num_fields*sizeof(MYSQL_FIELD*));
 
-	MYSQL_FIELD* pField;
-	for(int f=0; (pField=mysql_fetch_field(result)); ++f) {
-		ppFields[f] = pField;
+	MYSQL_FIELD* field;
+	for(int f=0; (field=mysql_fetch_field(result)); ++f) {
+		fields[f] = field, H(field->name) = f;
 	}
+
+	unsigned long long num_rows = mysql_num_rows(result);
+	MYSQL_ROW* rows = (MYSQL_ROW*)malloc((size_t)num_rows*sizeof(MYSQL_ROW));
+
+	unsigned long** lengths = (unsigned long**)malloc((size_t)num_rows*sizeof(unsigned long*));
 
 	MYSQL_ROW row;
 	for(int r=0; (row = mysql_fetch_row(result)); ++r) {
-		unsigned int i = 0;
-		unsigned long* lens = mysql_fetch_lengths(result);
-
-		unsigned int f;
-		for(f=0; f<nFields; ++f) {
-
-			char first_name[15] = "";
-
-			if(!strcmp(ppFields[f]->name, "first_name")) {
-				if(ppFields[f]->type & MYSQL_TYPE_STRING) {
-					memcpy(first_name, row[f], lens[f]);
-					printf("first_name: %s\n", first_name);
-				}
-			}
-
-		}
+		rows[r] = row, lengths[r] = mysql_fetch_lengths(result);
 	}
 
-	free(ppFields);
+	// TESTING
+
+	// NOTE: the index into the array to be sorted is "i" and the value is one of the fields
+	for(int i=0; i<num_rows; ++i) {
+		printf("emp_no:     %s\n", rows[i][H("emp_no")]);
+		printf("birth_date: %s\n", rows[i][H("birth_date")]);
+		printf("first_name: %s\n", rows[i][H("first_name")]);
+		printf("last_name:  %s\n", rows[i][H("last_name")]);
+		printf("gender:     %s\n", rows[i][H("gender")]);
+		printf("hire_date:  %s\n", rows[i][H("hire_date")]);
+		printf("\n");
+	}
+
+	// TESTING
+
+	free(lengths);
+	free(rows);
+	free(fields);
 	mysql_free_result(result);
-	*/
 
 	mysql_close(&db_con);
 
