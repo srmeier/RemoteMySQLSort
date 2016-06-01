@@ -8,13 +8,6 @@
 #include "mysql/mysql.h"
 
 //-----------------------------------------------------------------------------
-void insert_sort(MYSQL_ROW* rows, int n,
-	int (*cmp)(const MYSQL_ROW* a, const MYSQL_ROW* b)
-) {
-
-}
-
-//-----------------------------------------------------------------------------
 #define H(key) hash_table[hash_multiplicative(key)]
 
 #define HASH_SIZE 1000
@@ -29,6 +22,39 @@ unsigned int hash_multiplicative(const char* key) {
 	}
 
 	return (hash % HASH_SIZE);
+}
+
+//-----------------------------------------------------------------------------
+void insert_sort(MYSQL_ROW* rows, int n,
+	int (*cmp)(const MYSQL_ROW a, const MYSQL_ROW b)
+) {
+	for(int j=1; j<n; ++j) {
+		int i = j-1;
+
+		MYSQL_ROW row = rows[j];
+		while(i>=0 && cmp(rows[i], row)>0) {
+			rows[i+1] = rows[i];
+			i--;
+		}
+
+		rows[i+1] = row;
+	}
+}
+
+//-----------------------------------------------------------------------------
+int cmp_hire_date(const MYSQL_ROW a, const MYSQL_ROW b) {
+	char tmp[9] = "";
+	int year, month, day;
+
+	sscanf(a[H("hire_date")], "%d-%d-%d", &year, &month, &day);
+	sprintf(tmp, "%04d%02d%02d", year, month, day);
+	int a_key = atoi(tmp);
+
+	sscanf(b[H("hire_date")], "%d-%d-%d", &year, &month, &day);
+	sprintf(tmp, "%04d%02d%02d", year, month, day);
+	int b_key = atoi(tmp);
+
+	return (a_key > b_key);
 }
 
 //-----------------------------------------------------------------------------
@@ -48,7 +74,7 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
-	if(mysql_query(&db_con, "SELECT * FROM employees LIMIT 5;")) {
+	if(mysql_query(&db_con, "SELECT * FROM employees LIMIT 20;")) {
 		fprintf(stderr, "ERROR: \"%s\"\n", mysql_error(&db_con));
 		system("pause");
 		return -1;
@@ -81,6 +107,8 @@ int main(int argc, char** argv) {
 
 	// TESTING
 
+	insert_sort(rows, num_rows, cmp_hire_date);
+
 	// NOTE: the index into the array to be sorted is "i" and the value is one of the fields
 	for(int i=0; i<num_rows; ++i) {
 		/*
@@ -93,16 +121,7 @@ int main(int argc, char** argv) {
 		printf("\n");
 		*/
 
-		int b_year, b_month, b_day;
-		sscanf(rows[i][H("hire_date")], "%d-%d-%d", &b_year, &b_month, &b_day);
-
-		char tmp[9] = "";
-		sprintf(tmp, "%04d%02d%02d", b_year, b_month, b_day);
-		int key = atoi(tmp);
-
-		printf("%d\n", key);
-
-		
+		printf("%s\n", rows[i][H("hire_date")]);
 	}
 
 	// TESTING
